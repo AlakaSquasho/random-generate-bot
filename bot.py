@@ -262,6 +262,57 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_config["exclusions"]
         )
 
+        # 不再自动保存密码，只生成
+        # user_config["saved_passwords"].append({...})
+        # save_data(data)
+
+        # 生成操作键盘
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 刷新", callback_data=f"refresh_{length}"),
+                InlineKeyboardButton("📋 复制并保存", callback_data=f"save_{password}"),
+            ]
+        ]
+
+        await query.message.reply_text(
+            f"🔐 **生成的密码 ({length}位)**\n\n"
+            f"`{password}`\n\n"
+            f"_点击“复制并保存”将记录到数据库_",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    elif callback_data.startswith("refresh_"):
+        length = int(callback_data.replace("refresh_", ""))
+        password = generate_password(
+            length,
+            user_config["char_sets"],
+            user_config["exclusions"]
+        )
+
+        # 更新键盘中的 save_ callback_data
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 刷新", callback_data=f"refresh_{length}"),
+                InlineKeyboardButton("📋 复制并保存", callback_data=f"save_{password}"),
+            ]
+        ]
+
+        await query.edit_message_text(
+            f"🔐 **生成的密码 ({length}位)**\n\n"
+            f"`{password}`\n\n"
+            f"_点击“复制并保存”将记录到数据库_",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    elif callback_data.startswith("save_"):
+        password = callback_data[5:]  # 去掉 "save_" 前缀
+        length = len(password)
+
+        # 检查是否已经保存过（可选，防止重复点击）
+        # 这里简单处理，允许重复保存或者直接保存
+
         user_config["saved_passwords"].append({
             "password": password,
             "length": length,
@@ -269,12 +320,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
         save_data(data)
 
-        await query.message.reply_text(
-            f"🔐 **生成的密码 ({length}位)**\n\n"
-            f"`{password}`\n\n"
-            f"_点击上方密码即可复制_",
-            parse_mode="Markdown"
-        )
+        # 更新键盘，将“复制并保存”改为“已保存”
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 刷新", callback_data=f"refresh_{length}"),
+                InlineKeyboardButton("✅ 已保存", callback_data="noop"),
+            ]
+        ]
+
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.answer("✅ 密码已保存！", show_alert=False)
 
 
 def main():
