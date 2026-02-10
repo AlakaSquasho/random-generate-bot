@@ -270,7 +270,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [
                 InlineKeyboardButton("🔄 刷新", callback_data=f"refresh_{length}"),
-                InlineKeyboardButton("📋 复制并保存", callback_data=f"save_{password}"),
+                InlineKeyboardButton("💾 保存", callback_data=f"save_{password}"),
             ]
         ]
 
@@ -294,7 +294,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [
                 InlineKeyboardButton("🔄 刷新", callback_data=f"refresh_{length}"),
-                InlineKeyboardButton("📋 复制并保存", callback_data=f"save_{password}"),
+                InlineKeyboardButton("💾 保存", callback_data=f"save_{password}"),
             ]
         ]
 
@@ -310,8 +310,18 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         password = callback_data[5:]  # 去掉 "save_" 前缀
         length = len(password)
 
-        # 检查是否已经保存过（可选，防止重复点击）
-        # 这里简单处理，允许重复保存或者直接保存
+        for saved_item in user_config["saved_passwords"]:
+            if saved_item["password"] == password:
+                await query.answer("此密码已保存过！", show_alert=False)
+                # 更新键盘，显示“已保存”
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🔄 刷新", callback_data=f"refresh_{length}"),
+                        InlineKeyboardButton("✅ 已保存", callback_data="noop"),
+                    ]
+                ]
+                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+                return
 
         user_config["saved_passwords"].append({
             "password": password,
