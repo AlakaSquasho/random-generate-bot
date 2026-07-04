@@ -1,26 +1,32 @@
-# Telegram 密码生成器 Bot
+# Telegram Password Generator Bot
 
-一个私人使用的 Telegram Bot，用于生成随机密码并记录历史。
+A private Telegram bot for generating random passwords and keeping a history of saved entries.
 
-## 功能
+[中文说明 / Chinese README](./README_zh.md)
 
-- 自定义字符类型：a-z、A-Z、0-9、!@#$%
-- 排除易混淆字符：iIl10oO
-- 快速生成 16/20/24 位密码
-- **手动保存**：生成的密码默认不保存，点击按钮确认后记录
-- **即时刷新**：不满意当前密码可点击刷新重新生成
-- 密码历史记录保存
-- 用户权限控制
+## Features
 
-## 安装
+- Custom character sets: a-z, A-Z, 0-9, and `!@#$%`
+- Excludes ambiguous characters: `iIl10oO`
+- Quickly generates 16/20/24-character passwords
+- **Manual save**: generated passwords are not stored unless you confirm via button
+- **Instant refresh**: regenerate immediately if you do not like the current result
+- Saved password history
+- User access control
+
+## Deployment Demo
+
+![Deployment demo](./deployment-demo.png)
+
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 配置
+## Configuration
 
-创建 `config.json` 文件：
+Create a `config.json` file:
 
 ```json
 {
@@ -29,19 +35,19 @@ pip install -r requirements.txt
 }
 ```
 
-- `bot_token`: 从 [@BotFather](https://t.me/BotFather) 获取
-- `allowed_users`: 允许使用的用户 ID 列表
+- `bot_token`: get it from [@BotFather](https://t.me/BotFather)
+- `allowed_users`: list of Telegram user IDs allowed to use the bot
 
-获取用户 ID：向 Bot 发送 `/start`，未授权用户会收到自己的用户 ID。
+To get your user ID, send `/start` to the bot. Unauthorized users will receive their own user ID in the response.
 
-## 运行
+## Run
 
 ```bash
 python bot.py
 ```
 
-## 命令
+## Commands
 
-- `/start` - 显示主界面
-- `/list` - 查看保存的密码记录
-- `/clear` - 清除所有记录
+- `/start` - show the main interface
+- `/list` - view saved password records
+- `/clear` - clear all saved records
