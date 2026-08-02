@@ -1,42 +1,107 @@
-import os
 import json
+import logging
+import os
 import secrets
 import string
+import sys
+import tempfile
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # 配置文件路径
-CONFIG_FILE = "config.json"
-DATA_FILE = "passwords.json"
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_FILE = Path(os.environ.get("BOT_CONFIG_FILE", BASE_DIR / "config.json")).expanduser()
+DATA_FILE = Path(os.environ.get("BOT_DATA_FILE", BASE_DIR / "passwords.json")).expanduser()
+
+logger = logging.getLogger(__name__)
+
+# 运行时配置，在 main() 中加载
+CONFIG = {}
+ALLOWED_USERS = set()
+
+CONFIG_EXAMPLE = {
+    "bot_token": "YOUR_BOT_TOKEN_HERE",
+    "allowed_users": [123456789]
+}
+
+
+class ConfigError(Exception):
+    """配置错误"""
+
+
+class DataFileError(Exception):
+    """数据文件错误"""
+
+
+def setup_logging():
+    """初始化日志配置"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 
 
 def load_config() -> dict:
     """加载配置文件"""
-    if not os.path.exists(CONFIG_FILE):
-        print(f"Error: {CONFIG_FILE} not found")
-        print("Please create config.json with the following format:")
-        print(json.dumps({
-            "bot_token": "YOUR_BOT_TOKEN_HERE",
-            "allowed_users": [123456789]
-        }, indent=2))
-        exit(1)
+    if not CONFIG_FILE.exists():
+        raise ConfigError(
+            f"配置文件不存在: {CONFIG_FILE}\n"
+            "请复制 config.example.json 为 config.json，并填入 bot_token 和 allowed_users。\n"
+            f"示例配置:\n{json.dumps(CONFIG_EXAMPLE, ensure_ascii=False, indent=2)}"
+        )
 
-    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with CONFIG_FILE.open("r", encoding="utf-8") as f:
+            config = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ConfigError(f"配置文件不是合法 JSON: {CONFIG_FILE} ({e})") from e
+    except OSError as e:
+        raise ConfigError(f"读取配置文件失败: {CONFIG_FILE} ({e})") from e
+
+    if not isinstance(config, dict):
+        raise ConfigError("配置文件根对象必须是 JSON object")
+
+    return config
 
 
-# 加载配置
-CONFIG = load_config()
-ALLOWED_USERS = set(CONFIG.get("allowed_users", []))
+def validate_config(config: dict) -> set:
+    """校验配置并返回允许访问的用户集合"""
+    token = config.get("bot_token")
+    if not token or token in {"YOUR_BOT_TOKEN_HERE", "YOUR_TELEGRAM_BOT_TOKEN"}:
+        raise ConfigError("请在 config.json 中设置有效的 bot_token")
+
+    allowed_users = config.get("allowed_users", [])
+    if not isinstance(allowed_users, list):
+        raise ConfigError("allowed_users 必须是用户 ID 数组，例如: [123456789]")
+
+    invalid_users = [user_id for user_id in allowed_users if not isinstance(user_id, int)]
+    if invalid_users:
+        raise ConfigError("allowed_users 中的用户 ID 必须是整数")
+
+    return set(allowed_users)
+
+
+def load_runtime_config():
+    """加载并校验运行时配置"""
+    global CONFIG, ALLOWED_USERS
+
+    CONFIG = load_config()
+    ALLOWED_USERS = validate_config(CONFIG)
 
 
 def authorized_only(func):
     """装饰器：仅允许授权用户访问"""
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
+        user = update.effective_user
+        if user is None:
+            logger.warning("收到没有 effective_user 的 update，已拒绝处理")
+            return
+
+        user_id = user.id
         if user_id not in ALLOWED_USERS:
             if update.callback_query:
                 await update.callback_query.answer("⛔ 无权限访问", show_alert=True)
@@ -76,16 +141,58 @@ AMBIGUOUS_CHARS = "iIl10oO"
 
 def load_data() -> dict:
     """加载保存的数据"""
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"users": {}}
+    if not DATA_FILE.exists():
+        return {"users": {}}
+
+    try:
+        with DATA_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise DataFileError(
+            f"数据文件不是合法 JSON: {DATA_FILE} ({e})。"
+            "为避免覆盖损坏数据，程序将退出，请先手动检查或备份该文件。"
+        ) from e
+    except OSError as e:
+        raise DataFileError(f"读取数据文件失败: {DATA_FILE} ({e})") from e
+
+    if not isinstance(data, dict):
+        raise DataFileError("数据文件根对象必须是 JSON object")
+
+    users = data.setdefault("users", {})
+    if not isinstance(users, dict):
+        raise DataFileError("数据文件中的 users 必须是 JSON object")
+
+    return data
 
 
 def save_data(data: dict):
     """保存数据"""
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=DATA_FILE.parent,
+            prefix=f".{DATA_FILE.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as f:
+            temp_path = Path(f.name)
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.replace(temp_path, DATA_FILE)
+    except OSError:
+        if temp_path and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                logger.warning("清理临时数据文件失败: %s", temp_path)
+        raise
 
 
 def get_user_config(user_id: str, data: dict) -> dict:
@@ -184,7 +291,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🔑 **密码生成器**\n\n"
         "选择要包含的字符类型，然后点击生成按钮。\n"
-        "生成的密码会自动保存，可通过 /list 查看历史记录。",
+        "生成的密码默认不保存，点击保存按钮后可通过 /list 查看历史记录。",
         reply_markup=build_main_keyboard(user_config),
         parse_mode="Markdown"
     )
@@ -277,7 +384,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             f"🔐 **生成的密码 ({length}位)**\n\n"
             f"`{password}`\n\n"
-            f"_点击“复制并保存”将记录到数据库_",
+            f"_点击“保存”将记录到历史_",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
@@ -301,7 +408,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             f"🔐 **生成的密码 ({length}位)**\n\n"
             f"`{password}`\n\n"
-            f"_点击“复制并保存”将记录到数据库_",
+            f"_点击“保存”将记录到历史_",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
@@ -342,25 +449,48 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("✅ 密码已保存！", show_alert=False)
 
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """记录 Telegram handler 中未捕获的异常"""
+    error = context.error
+    if error:
+        logger.error(
+            "处理 update 时发生未捕获异常",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+    else:
+        logger.error("处理 update 时发生未知异常")
+
+
 def main():
     """主函数"""
-    token = CONFIG.get("bot_token")
-    if not token or token == "YOUR_BOT_TOKEN_HERE":
-        print("Error: Please set bot_token in config.json")
-        return
+    setup_logging()
+
+    logger.info("配置文件路径: %s", CONFIG_FILE)
+    logger.info("数据文件路径: %s", DATA_FILE)
+
+    try:
+        load_runtime_config()
+        load_data()
+    except (ConfigError, DataFileError) as e:
+        logger.error("启动失败: %s", e)
+        sys.exit(1)
 
     if not ALLOWED_USERS:
-        print("Warning: No allowed_users configured, bot will reject all requests")
+        logger.warning("未配置 allowed_users，Bot 将拒绝所有请求")
 
-    application = Application.builder().token(token).build()
+    application = Application.builder().token(CONFIG["bot_token"]).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("list", list_passwords))
     application.add_handler(CommandHandler("clear", clear_passwords))
     application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_error_handler(error_handler)
 
-    print("Bot is running...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("Bot is running...")
+    try:
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    finally:
+        logger.info("Bot stopped")
 
 
 if __name__ == "__main__":

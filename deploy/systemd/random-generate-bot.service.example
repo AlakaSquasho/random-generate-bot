@@ -1,0 +1,22 @@
+[Unit]
+Description=Random Generate Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/random_generate_bot
+ExecStart=/opt/random_generate_bot/.venv/bin/python /opt/random_generate_bot/bot.py
+Restart=on-failure
+RestartSec=5
+User=randombot
+Group=randombot
+Environment=PYTHONUNBUFFERED=1
+
+# Optional: use standard Linux paths for config and data files.
+# Create these directories/files and make them readable/writable by User=randombot.
+# Environment=BOT_CONFIG_FILE=/etc/random-generate-bot/config.json
+# Environment=BOT_DATA_FILE=/var/lib/random-generate-bot/passwords.json
+
+[Install]
+WantedBy=multi-user.target
